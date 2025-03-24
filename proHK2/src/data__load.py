@@ -1,8 +1,8 @@
 ﻿import mysql.connector
 import pandas as pd
+import warnings
 
 def load_data(host, user, password, database, query):
-    # Kết nối đến cơ sở dữ liệu MySQL
     try:
         connection = mysql.connector.connect(
             host=host,
@@ -13,11 +13,13 @@ def load_data(host, user, password, database, query):
         print("Kết nối thành công")
     except mysql.connector.Error as err:
         print(f"Lỗi kết nối {err}")
-    
-    # Sử dụng pandas để đọc dữ liệu từ MySQL
+        return pd.DataFrame()
+
+    # Tắt cảnh báo từ pandas
+    warnings.filterwarnings("ignore", category=UserWarning, message="pandas only supports SQLAlchemy")
+
+    # Đọc dữ liệu bằng pandas
     data = pd.read_sql(query, connection)
-    
-    # Đóng kết nối
+
     connection.close()
-    
     return data
