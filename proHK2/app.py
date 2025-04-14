@@ -5,6 +5,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker  # Đảm bảo bạn đã nhập thư viện ticker
+
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from src.excel_import import import_excel
 from src.data__process import process_data
@@ -17,29 +19,45 @@ from src.data__analysis import analyze_with_month_and_location, analyze_with_mon
 db = Database(**db_config)
 
 # Hàm vẽ biểu đồ
+# Hàm vẽ biểu đồ
 def visualize_data(monthly_sales, hourly_sales, daily_sales, canvas_frame):
     for widget in canvas_frame.winfo_children():
         widget.destroy()
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
+    # Doanh số theo tháng
     if not monthly_sales.empty:
         axes[0].plot(monthly_sales['Month'], monthly_sales['sales'], marker='o')
         axes[0].set_title('Doanh số theo tháng')
         axes[0].set_xticks(range(1, 13))
         axes[0].grid(True)
 
+        # Định dạng trục y và giảm kích thước font để không bị đè lên
+        axes[0].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[0].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+
+    # Doanh số theo ngày
     if not daily_sales.empty and 'Day' in daily_sales.columns:
         axes[1].plot(daily_sales['Day'], daily_sales['sales'], marker='o', color='green')
         axes[1].set_title('Doanh số theo ngày trong tháng')
-        axes[1].set_xticks(range(1, 32, 5))
+        axes[1].set_xticks(range(1, 32, 3))  # Cách 3 ngày để dễ nhìn hơn
         axes[1].grid(True)
 
+        # Định dạng trục y và giảm kích thước font
+        axes[1].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[1].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+
+    # Doanh số theo giờ
     if not hourly_sales.empty:
         axes[2].bar(hourly_sales['Hour'], hourly_sales['sales'])
         axes[2].set_title('Doanh số theo giờ')
-        axes[2].set_xticks(range(0, 24, 2))
+        axes[2].set_xticks(range(0, 24, 2))  # Hiển thị theo giờ cách 2 tiếng
         axes[2].grid(True)
+
+        # Định dạng trục y và giảm kích thước font
+        axes[2].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[2].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
 
     canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
     canvas.draw()
@@ -186,19 +204,48 @@ def compare_by_year_month_location():
 
 def visualize_comparison(monthly_sales_current, monthly_sales_compare, compare_month):
     fig, ax = plt.subplots(figsize=(8, 6))
+    year = selected_year.get()
+    compare_year = selected_year_compare.get()  # năm so sánh
+    month = selected_month.get()
+    compare_month = selected_month_compare.get()  # tháng so sánh
+   
+    # Xóa biểu đồ cũ trước khi vẽ lại
+    clear_canvas()
+    if not month and not compare_month:
+        # Vẽ biểu đồ doanh thu cho năm/tháng hiện tại
+        ax.plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label=f"{year}", marker='o', color='blue')
 
-    # Vẽ biểu đồ doanh thu cho năm/tháng hiện tại
-    ax.plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label="Năm/Tháng hiện tại", marker='o', color='blue')
+        # Vẽ biểu đồ doanh thu cho năm/tháng so sánh
+        ax.plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"{compare_year}", marker='o', color='red')
 
-    # Vẽ biểu đồ doanh thu cho năm/tháng so sánh
-    ax.plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"Năm/Tháng {compare_month}", marker='o', color='red')
+        # Cấu hình biểu đồ
+        ax.set_title(f"So sánh doanh thu: {selected_year.get()} vs {selected_year_compare.get()}")
+        ax.set_xlabel("Tháng")
+        ax.set_ylabel("Doanh thu (VND)")
+        ax.set_xticks(range(1, 13))
+        ax.grid(True)
 
-    # Cấu hình biểu đồ
-    ax.set_title(f"So sánh doanh thu: {selected_month.get()}/{selected_year.get()} vs {compare_month}/{selected_year_compare.get()}")
-    ax.set_xlabel("Tháng")
-    ax.set_ylabel("Doanh thu (VND)")
-    ax.legend()
-    ax.grid(True)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        ax.tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+
+
+
+
+    elif month and compare_month:
+                # Vẽ biểu đồ doanh thu cho năm/tháng hiện tại
+        ax.plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label=f"{year}/Tháng {month}", marker='o', color='blue')
+
+        # Vẽ biểu đồ doanh thu cho năm/tháng so sánh
+        ax.plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"{compare_year}/Tháng {compare_month}", marker='o', color='red')
+
+        # Cấu hình biểu đồ
+        ax.set_title(f"So sánh doanh thu: {selected_month.get()}/{selected_year.get()} vs {compare_month}/{selected_year_compare.get()}")
+        ax.set_xlabel("Tháng")
+        ax.set_ylabel("Doanh thu (VND)")
+        ax.set_xticks(range(1, 13))
+        ax.grid(True)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        ax.tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
 
     # Hiển thị biểu đồ trong Tkinter
     canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
