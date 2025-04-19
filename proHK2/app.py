@@ -10,7 +10,7 @@ import matplotlib.ticker as ticker  # Đảm bảo bạn đã nhập thư viện
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from src.excel_import import import_excel
 from src.data__process import process_data
-from src.data__analysis import analyze_data
+from src.data__analysis import analyze_data, forecast_sales_arima
 from src.database import Database
 from src.config import db_config
 from src.data__analysis import analyze_with_month_and_location, analyze_with_month, analyze_with_location
@@ -92,6 +92,8 @@ def import_and_save_data():
 
 # Phân tích & hiển thị
 def run_analysis():
+    forecast_canvas_frame.pack_forget()  # Ẩn khung dự báo nếu đang hiện
+    canvas_frame.pack(pady=10)
     year = selected_year.get()
     month = selected_month.get()
     location = selected_location.get()
@@ -147,6 +149,35 @@ def run_analysis():
 
     except Exception as e:
         result_label.config(text=f"Lỗi phân tích: {e}")
+def run_sales_forecast():
+    try:
+        data = db.read_query("SELECT * FROM doanhthu_excel")
+        if data.empty:
+            result_label.config(text="Không có dữ liệu để dự báo.")
+            return
+
+        data['order_date'] = pd.to_datetime(data['order_date'], errors='coerce')
+        data.dropna(subset=['order_date'], inplace=True)
+
+        # 1. Ẩn biểu đồ phân tích nếu đang hiện
+        canvas_frame.pack_forget()
+
+        # 2. Xóa khung biểu đồ dự báo (nếu có cũ)
+        clear_forecast_canvas()
+
+        # 3. Hiện lại frame dự báo
+        forecast_canvas_frame.pack(pady=10)
+
+        # 4. Gọi hàm dự báo & vẽ
+        fig = forecast_sales_arima(data)
+
+        canvas = FigureCanvasTkAgg(fig, master=forecast_canvas_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack()
+
+        result_label.config(text="Dự báo doanh thu đã được hiển thị.")
+    except Exception as e:
+        result_label.config(text=f"Lỗi trong quá trình dự báo: {e}")
 
 def compare_by_year_month_location():
     year = selected_year.get()
@@ -158,95 +189,136 @@ def compare_by_year_month_location():
     # Xóa biểu đồ cũ trước khi vẽ lại
     clear_canvas()
 
-    # Xây dựng truy vấn SQL cho năm và tháng hiện tại
-    query_current = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {year}"
-
-    if month:
-        query_current += f" AND MONTH(DATE(order_date)) = {month}"
-    if location:
-        query_current += f" AND city = '{location}'"
-
-    # Xây dựng truy vấn SQL cho năm và tháng so sánh
-    query_compare = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {compare_year}"
-
-    if compare_month:
-        query_compare += f" AND MONTH(DATE(order_date)) = {compare_month}"
-    if location:
-        query_compare += f" AND city = '{location}'"
-
-    try:
-        # Truy vấn dữ liệu cho năm, tháng và địa điểm hiện tại
-        data_current = db.read_query(query_current)
-        if data_current.empty:
-            result_label.config(text="Không có dữ liệu phù hợp cho năm/tháng hiện tại.")
-            return
-        processed_data_current = process_data(data_current)
-
-        # Truy vấn dữ liệu cho năm, tháng và địa điểm so sánh
-        data_compare = db.read_query(query_compare)
-        if data_compare.empty:
-            result_label.config(text="Không có dữ liệu phù hợp cho năm/tháng so sánh.")
-            return
-        processed_data_compare = process_data(data_compare)
-
-        # Phân tích dữ liệu cho năm/tháng hiện tại và năm/tháng so sánh
-        result_text_current, hourly_sales_current, monthly_sales_current, daily_sales_current = analyze_data(processed_data_current)
-        result_text_compare, hourly_sales_compare, monthly_sales_compare, daily_sales_compare = analyze_data(processed_data_compare)
-
-        # Vẽ biểu đồ so sánh doanh thu giữa năm/tháng hiện tại và năm/tháng so sánh
-        visualize_comparison(monthly_sales_current, monthly_sales_compare, compare_month)
-
-        # Cập nhật kết quả phân tích
-        result_label.config(text=f"{result_text_current}\n\nSo sánh với {compare_year}/{compare_month}:\n{result_text_compare}")
-
-    except Exception as e:
-        result_label.config(text=f"Lỗi phân tích: {e}")
-
-def visualize_comparison(monthly_sales_current, monthly_sales_compare, compare_month):
-    fig, ax = plt.subplots(figsize=(8, 6))
-    year = selected_year.get()
-    compare_year = selected_year_compare.get()  # năm so sánh
-    month = selected_month.get()
-    compare_month = selected_month_compare.get()  # tháng so sánh
-   
-    # Xóa biểu đồ cũ trước khi vẽ lại
-    clear_canvas()
+    # Trường hợp người dùng chỉ chọn năm (so sánh giữa 2 năm)
     if not month and not compare_month:
-        # Vẽ biểu đồ doanh thu cho năm/tháng hiện tại
-        ax.plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label=f"{year}", marker='o', color='blue')
+        # Xây dựng truy vấn SQL cho năm hiện tại
+        query_current = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {year}"
+        if location:
+            query_current += f" AND city = '{location}'"
 
-        # Vẽ biểu đồ doanh thu cho năm/tháng so sánh
-        ax.plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"{compare_year}", marker='o', color='red')
+        # Xây dựng truy vấn SQL cho năm so sánh
+        query_compare = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {compare_year}"
+        if location:
+            query_compare += f" AND city = '{location}'"
 
-        # Cấu hình biểu đồ
-        ax.set_title(f"So sánh doanh thu: {selected_year.get()} vs {selected_year_compare.get()}")
-        ax.set_xlabel("Tháng")
-        ax.set_ylabel("Doanh thu (VND)")
-        ax.set_xticks(range(1, 13))
-        ax.grid(True)
+        try:
+            # Truy vấn dữ liệu cho năm hiện tại
+            data_current = db.read_query(query_current)
+            if data_current.empty:
+                result_label.config(text="Không có dữ liệu cho năm hiện tại.")
+                return
+            processed_data_current = process_data(data_current)
+            monthly_sales_current = processed_data_current.groupby('Month')['sales'].sum().reset_index()
 
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
-        ax.tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+            # Truy vấn dữ liệu cho năm so sánh
+            data_compare = db.read_query(query_compare)
+            if data_compare.empty:
+                result_label.config(text="Không có dữ liệu cho năm so sánh.")
+                return
+            processed_data_compare = process_data(data_compare)
+            monthly_sales_compare = processed_data_compare.groupby('Month')['sales'].sum().reset_index()
 
+            # Vẽ biểu đồ so sánh
+            visualize_comparison(monthly_sales_current, monthly_sales_compare, None, None, compare_month)
 
+            result_label.config(text=f"So sánh doanh thu giữa {year} và {compare_year}.")
+        except Exception as e:
+            result_label.config(text=f"Lỗi phân tích: {e}")
 
-
+    # Trường hợp người dùng chọn tháng để so sánh (so sánh giữa 2 tháng)
     elif month and compare_month:
-                # Vẽ biểu đồ doanh thu cho năm/tháng hiện tại
-        ax.plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label=f"{year}/Tháng {month}", marker='o', color='blue')
+        # Xây dựng truy vấn SQL cho tháng hiện tại
+        query_current = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {year} AND MONTH(DATE(order_date)) = {month}"
+        if location:
+            query_current += f" AND city = '{location}'"
 
-        # Vẽ biểu đồ doanh thu cho năm/tháng so sánh
-        ax.plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"{compare_year}/Tháng {compare_month}", marker='o', color='red')
+        # Xây dựng truy vấn SQL cho tháng so sánh
+        query_compare = f"SELECT * FROM doanhthu_excel WHERE YEAR(order_date) = {compare_year} AND MONTH(DATE(order_date)) = {compare_month}"
+        if location:
+            query_compare += f" AND city = '{location}'"
 
-        # Cấu hình biểu đồ
-        ax.set_title(f"So sánh doanh thu: {selected_month.get()}/{selected_year.get()} vs {compare_month}/{selected_year_compare.get()}")
-        ax.set_xlabel("Tháng")
-        ax.set_ylabel("Doanh thu (VND)")
-        ax.set_xticks(range(1, 13))
-        ax.grid(True)
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
-        ax.tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+        try:
+            # Truy vấn dữ liệu cho tháng hiện tại
+            data_current = db.read_query(query_current)
+            if data_current.empty:
+                result_label.config(text="Không có dữ liệu cho tháng hiện tại.")
+                return
+            processed_data_current = process_data(data_current)
+            daily_sales_current = processed_data_current.groupby('Day')['sales'].sum().reset_index()
 
+            # Truy vấn dữ liệu cho tháng so sánh
+            data_compare = db.read_query(query_compare)
+            if data_compare.empty:
+                result_label.config(text="Không có dữ liệu cho tháng so sánh.")
+                return
+            processed_data_compare = process_data(data_compare)
+            daily_sales_compare = processed_data_compare.groupby('Day')['sales'].sum().reset_index()
+
+            # Vẽ biểu đồ so sánh
+            visualize_comparison(None, None, daily_sales_current, daily_sales_compare, compare_month)
+
+            result_label.config(text=f"So sánh doanh thu giữa tháng {month}/{year} và tháng {compare_month}/{compare_year}.")
+        except Exception as e:
+            result_label.config(text=f"Lỗi phân tích: {e}")
+
+def visualize_comparison(monthly_sales_current, monthly_sales_compare, daily_sales_current, daily_sales_compare, compare_month):
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))  # Tạo 2 biểu đồ trong 1 hàng
+    
+    year = selected_year.get()
+    compare_year = selected_year_compare.get()  # Năm so sánh
+    month = selected_month.get()
+    compare_month = selected_month_compare.get()  # Tháng so sánh
+    
+    clear_canvas()
+
+    # Trường hợp so sánh giữa 2 năm (biểu đồ đường và cột)
+    if not month and not compare_month:
+        # Biểu đồ đường: Doanh thu theo tháng cho cả 2 năm
+        axes[0].plot(monthly_sales_current['Month'], monthly_sales_current['sales'], label=f"{year}", marker='o', color='blue')
+        axes[0].plot(monthly_sales_compare['Month'], monthly_sales_compare['sales'], label=f"{compare_year}", marker='o', color='red')
+        axes[0].set_title(f"Doanh thu theo tháng: {year} vs {compare_year}")
+        axes[0].set_xlabel("Tháng")
+        axes[0].set_ylabel("Doanh thu (VND)")
+        axes[0].set_xticks(range(1, 13))
+        axes[0].grid(True)
+        axes[0].legend()
+
+         # Định dạng trục y và giảm kích thước font để không bị đè lên
+        axes[0].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[0].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+        # Biểu đồ cột: Tổng doanh thu cho 2 năm
+        axes[1].bar([year, compare_year], [monthly_sales_current['sales'].sum(), monthly_sales_compare['sales'].sum()], color=['blue', 'red'])
+        axes[1].set_title(f"Tổng doanh thu: {year} vs {compare_year}")
+        axes[1].set_xlabel("Năm")
+        axes[1].set_ylabel("Tổng doanh thu (VND)")
+        axes[1].grid(True)
+
+         # Định dạng trục y và giảm kích thước font để không bị đè lên
+        axes[1].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[1].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+    # Trường hợp so sánh giữa 2 tháng (biểu đồ đường và cột)
+    elif month and compare_month:
+        # Biểu đồ đường: Doanh thu theo ngày cho tháng hiện tại và tháng so sánh
+        axes[0].plot(daily_sales_current['Day'], daily_sales_current['sales'], label=f"Tháng {month}/{year}", marker='o', color='blue')
+        axes[0].plot(daily_sales_compare['Day'], daily_sales_compare['sales'], label=f"Tháng {compare_month}/{compare_year}", marker='o', color='red')
+        axes[0].set_title(f"Doanh thu theo ngày: {month}/{year} vs {compare_month}/{compare_year}")
+        axes[0].set_xlabel("Ngày")
+        axes[0].set_ylabel("Doanh thu (VND)")
+        axes[0].set_xticks(range(1, 32, 3))  # Hiển thị theo ngày cách 3 ngày
+        axes[0].grid(True)
+        axes[0].legend()
+
+         # Định dạng trục y và giảm kích thước font để không bị đè lên
+        axes[0].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[0].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
+        # Biểu đồ cột: Tổng doanh thu cho 2 tháng
+        axes[1].bar([month, compare_month], [daily_sales_current['sales'].sum(), daily_sales_compare['sales'].sum()], color=['blue', 'red'])
+        axes[1].set_title(f"Tổng doanh thu: Tháng {month}/{year} vs Tháng {compare_month}/{compare_year}")
+        axes[1].set_xlabel("Tháng")
+        axes[1].set_ylabel("Tổng doanh thu (VND)")
+        axes[1].grid(True)
+        axes[1].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: '{:,.0f}'.format(x)))
+        axes[1].tick_params(axis='y', labelsize=6)  # Giảm kích thước font của trục y
     # Hiển thị biểu đồ trong Tkinter
     canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
     canvas.draw()
@@ -255,6 +327,11 @@ def visualize_comparison(monthly_sales_current, monthly_sales_compare, compare_m
 def clear_canvas():
     for widget in canvas_frame.winfo_children():
         widget.destroy()
+
+def clear_forecast_canvas():
+    for widget in forecast_canvas_frame.winfo_children():
+        widget.destroy()
+    forecast_canvas_frame.pack_forget()  # 👈 đảm bảo ẩn hoàn toàn
 
 # Cập nhật danh sách thành phố theo năm
 def update_locations(event=None):
@@ -308,14 +385,18 @@ tk.Button(root, text="So sánh theo năm, tháng và địa điểm", command=co
 
 selected_year.bind("<<ComboboxSelected>>", update_locations)
 update_locations()
+tk.Button(root, text="dự báo doanh thu", command=run_sales_forecast).pack(pady=10)
+
 
 tk.Button(root, text="Nhập dữ liệu từ Excel", command=import_and_save_data).pack(pady=10)
 
 tk.Button(root, text="Phân tích", command=run_analysis).pack(pady=10)
 result_label = tk.Label(root, text="", wraplength=400, justify="left")
 result_label.pack(pady=10)
-
 canvas_frame = tk.Frame(root)
 canvas_frame.pack(pady=10)
+
+forecast_canvas_frame = tk.Frame(root)
+
 
 root.mainloop()

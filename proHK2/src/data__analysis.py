@@ -1,6 +1,7 @@
 ﻿# data__analysis.py
 import pandas as pd
-
+from statsmodels.tsa.arima.model import ARIMA
+import matplotlib.pyplot as plt
 # Phân tích cho trường hợp chọn tháng và địa điểm
 # data__analysis.py
 def analyze_with_month_and_location(processed_data, month, year, location):
@@ -147,3 +148,38 @@ def analyze_data(data):
 
     return result_text, hourly_sales, monthly_sales, daily_sales
 # Thêm vào data__analysis.py
+
+def forecast_sales_arima(data, months_to_forecast=6):
+    # Chuyển định dạng ngày
+    data['Order Date'] = pd.to_datetime(data['order_date'], errors='coerce')
+    data.dropna(subset=['Order Date'], inplace=True)
+
+    # Tạo chuỗi thời gian theo tháng
+    data['Month'] = data['Order Date'].dt.to_period('M')
+    monthly_sales = data.groupby('Month')['sales'].sum()
+    monthly_sales.index = monthly_sales.index.to_timestamp()
+
+    # Áp dụng ARIMA
+    model = ARIMA(monthly_sales, order=(5, 1, 0))  # Có thể tinh chỉnh
+    model_fit = model.fit()
+
+    # Dự báo tương lai
+    forecast = model_fit.forecast(steps=months_to_forecast)
+
+    # Tạo index thời gian tương ứng cho forecast
+    last_date = monthly_sales.index[-1]
+    forecast_index = pd.date_range(start=last_date + pd.DateOffset(months=1), periods=months_to_forecast, freq='MS')
+
+    # Plot biểu đồ
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(monthly_sales.index, monthly_sales.values, label='Doanh thu thực tế', marker='o')
+    ax.plot(forecast_index, forecast, label='Dự báo doanh thu', color='red', marker='x')
+
+    ax.set_title('Dự báo doanh thu theo tháng')
+    ax.set_xlabel('Tháng')
+    ax.set_ylabel('Doanh thu (VND)')
+    ax.legend()
+    ax.tick_params(axis='x', rotation=45)
+    ax.grid(True)
+
+    return fig
